@@ -1,0 +1,112 @@
+# ── Source & build tooling ──────────────────────────────────────────────────
+src/**
+scripts/**
+tsconfig.json
+vitest.config.ts
+esbuild.config.mjs
+.eslintrc*
+.prettierignore
+.prettierrc*
+
+# ── Tests ───────────────────────────────────────────────────────────────────
+**/*.test.ts
+**/*.spec.ts
+**/__tests__/**
+**/__fixtures__/**
+coverage/**
+
+# ── Source maps (keep dist/*.js only) ───────────────────────────────────────
+**/*.map
+
+# ── Repo metadata ───────────────────────────────────────────────────────────
+.vscode/**
+.vscode-test/**
+.github/**
+.claude/**
+.gitignore
+.gitattributes
+.DS_Store
+Thumbs.db
+CLAUDE.md
+
+# ── Node / build caches ─────────────────────────────────────────────────────
+node_modules/.cache/**
+*.tsbuildinfo
+
+# ── Local DBs / logs that may leak into the workspace ───────────────────────
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.log
+
+# ── Artefacts from previous packaging runs ──────────────────────────────────
+*.vsix
+
+# ── node_modules slimming ───────────────────────────────────────────────────
+# Production deps must ship (no bundler), but their docs / demos / type defs
+# / build artefacts don't need to. Each rule below was added because it
+# shaved meaningful weight from the .vsix.
+node_modules/**/*.md
+node_modules/**/*.markdown
+node_modules/**/*.ts
+node_modules/**/*.d.ts
+node_modules/**/*.map
+node_modules/**/*.flow
+node_modules/**/*.coffee
+node_modules/**/*.tsbuildinfo
+node_modules/**/CHANGELOG*
+node_modules/**/HISTORY*
+node_modules/**/AUTHORS*
+node_modules/**/CONTRIBUTORS*
+node_modules/**/.npmignore
+node_modules/**/.editorconfig
+node_modules/**/.eslintrc*
+node_modules/**/.prettierrc*
+node_modules/**/.travis.yml
+node_modules/**/.github/**
+node_modules/**/.vscode/**
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/__tests__/**
+node_modules/**/example/**
+node_modules/**/examples/**
+node_modules/**/demo/**
+node_modules/**/docs/**
+node_modules/**/doc/**
+node_modules/**/man/**
+node_modules/**/scripts/**
+node_modules/**/Makefile
+node_modules/**/Gulpfile*
+node_modules/**/Gruntfile*
+node_modules/**/.babelrc*
+
+# sqlite3 keeps the source tarball + Debug build alongside the Release .node
+# binary it actually uses — strip the unused parts.
+node_modules/sqlite3/deps/**
+node_modules/sqlite3/src/**
+node_modules/sqlite3/build/Debug/**
+node_modules/sqlite3/build/Release/obj.target/**
+node_modules/sqlite3/node_modules/node-addon-api/**
+node_modules/node-gyp/**
+node_modules/**/*.h
+node_modules/**/*.cc
+node_modules/**/*.cpp
+node_modules/**/*.py
+node_modules/**/*.gyp
+node_modules/**/binding.gyp
+
+# AWS SDK ships UMD/ESM bundles plus dist-types. We only import dist-cjs at
+# runtime — the rest is dead weight in a CommonJS extension host.
+node_modules/@aws-sdk/**/dist-es/**
+node_modules/@aws-sdk/**/dist-types/**
+node_modules/@smithy/**/dist-es/**
+node_modules/@smithy/**/dist-types/**
+
+# Cytoscape — webview already loads media/cytoscape.min.js; the npm dist
+# bundles aren't imported by the extension host either.
+node_modules/cytoscape/dist/**
+node_modules/cytoscape-fcose/demo/**
+node_modules/cytoscape-fcose/cytoscape-fcose.js
+node_modules/cose-base/cose-base.js
+node_modules/layout-base/layout-base.js
+

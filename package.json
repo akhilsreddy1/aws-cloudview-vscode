@@ -1,0 +1,320 @@
+{
+  "name": "aws-cloudview",
+  "displayName": "AWS CloudView",
+  "description": "Explore, manage, and map AWS resources from VS Code—rich HTML webviews for each resource, dashboards, and graphs",
+  "version": "0.0.7",
+  "publisher": "akhileshreddy",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Testing"
+  ],
+  "keywords": [
+    "AWS",
+    "CloudWatch",
+    "S3",
+    "Lambda",
+    "EC2",
+    "Graph"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akhilsreddy1/aws-cloudview-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/akhilsreddy1/aws-cloudview-vscode/issues"
+  },
+  "homepage": "https://github.com/akhilsreddy1/aws-cloudview-vscode#readme",
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cloudView",
+          "title": "AWS CloudView",
+          "icon": "media/aws-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "cloudView": [
+        {
+          "id": "cloudViewServices",
+          "name": "Services"
+        },
+        {
+          "id": "cloudViewRegions",
+          "name": "Region"
+        },
+        {
+          "id": "cloudViewProfiles",
+          "name": "AWS Profile"
+        }
+  
+      ]
+    },
+    "commands": [
+      {
+        "command": "cloudView.selectProfile",
+        "title": "CloudView: Select AWS Profiles",
+        "icon": "$(account)"
+      },
+      {
+        "command": "cloudView.refreshResources",
+        "title": "CloudView: Refresh Resources",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cloudView.openServiceDetail",
+        "title": "CloudView: Open Service Dashboard",
+        "icon": "$(table)"
+      },
+      {
+        "command": "cloudView.openGraphView",
+        "title": "CloudView: Open Graph View",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "cloudView.viewLogs",
+        "title": "CloudView: View CloudWatch Logs",
+        "icon": "$(output)"
+      },
+      {
+        "command": "cloudView.toggleRegion",
+        "title": "CloudView: Toggle Region",
+        "icon": "$(map)"
+      },
+      {
+        "command": "cloudView.toggleProfile",
+        "title": "CloudView: Toggle Profile",
+        "icon": "$(account)"
+      },
+      {
+        "command": "cloudView.clearDatabase",
+        "title": "CloudView: Clear Local Database",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cloudView.openServiceGraph",
+        "title": "CloudView: Open Service Graph",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "cloudView.invokeLambda",
+        "title": "CloudView: Invoke Lambda Function",
+        "icon": "$(play)"
+      },
+      {
+        "command": "cloudView.openWelcome",
+        "title": "CloudView: Open Welcome Guide",
+        "icon": "$(home)"
+      },
+      {
+        "command": "cloudView.s3.browsePrefixes",
+        "title": "CloudView: Browse S3 Prefixes & Upload",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "cloudView.ecr.viewImages",
+        "title": "CloudView: View ECR Image Tags",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "cloudView.ecs.viewTaskDef",
+        "title": "CloudView: View ECS Task Definition",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "cloudView.checkPublicExposure",
+        "title": "CloudView: Check Public Exposure",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "cloudView.logs.browseStreams",
+        "title": "CloudView: Browse Log Streams",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "cloudView.sqs.viewMessages",
+        "title": "CloudView: View SQS Messages / Redrive",
+        "icon": "$(mail)"
+      },
+      {
+        "command": "cloudView.dynamodb.peekItems",
+        "title": "CloudView: Peek DynamoDB Items (Scan / Query latest)",
+        "icon": "$(database)"
+      },
+      {
+        "command": "cloudView.cfn.viewTemplate",
+        "title": "CloudView: View CloudFormation Template",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "cloudView.refreshProfiles",
+        "title": "CloudView: Reload AWS Profiles",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "cloudViewProfiles",
+        "contents": "No AWS profiles detected.\n\nSet up profiles in `~/.aws/config` or `~/.aws/credentials`, then restart.\n\n[Open Welcome Guide](command:cloudView.openWelcome)"
+      },
+      {
+        "view": "cloudViewServices",
+        "contents": "Select an AWS profile and region, then refresh to discover resources.\n\n[Select Profiles](command:cloudView.selectProfile)\n[Refresh Resources](command:cloudView.refreshResources)\n[Open Welcome Guide](command:cloudView.openWelcome)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cloudView.refreshResources",
+          "when": "view == cloudViewServices",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cloudView.openGraphView",
+          "when": "view == cloudViewServices",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cloudView.clearDatabase",
+          "when": "view == cloudViewServices",
+          "group": "navigation@3"
+        },
+        {
+          "command": "cloudView.refreshProfiles",
+          "when": "view == cloudViewProfiles",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cloudView.openServiceDetail",
+          "when": "view == cloudViewServices && viewItem == cloudView.service",
+          "group": "inline@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "cloudView.refreshResources",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "view == cloudViewServices"
+      }
+    ],
+    "configuration": {
+      "title": "CloudView",
+      "properties": {
+        "cloudView.aws.regions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "us-east-1",
+            "us-west-2"
+          ],
+          "description": "AWS regions to browse. A 'global' region is always included for IAM, S3, etc."
+        },
+        "cloudView.cache.defaultTtlSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 30,
+          "maximum": 3600,
+          "description": "Default cache TTL for discovered resources (in seconds)."
+        },
+        "cloudView.scheduler.globalConcurrency": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Maximum concurrent AWS API requests across all services."
+        },
+        "cloudView.scheduler.serviceConcurrency": {
+          "type": "object",
+          "default": {
+            "ec2": 4,
+            "iam": 2,
+            "s3": 2,
+            "sts": 2
+          },
+          "description": "Per-service concurrency limits for AWS API requests."
+        },
+        "cloudView.graph.defaultExpandDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Default BFS depth when expanding a resource in the graph view."
+        },
+        "cloudView.proxy.url": {
+          "type": "string",
+          "default": "",
+          "description": "Proxy URL for AWS API calls (e.g. http://corp-proxy.example.com:8080). Leave empty to use the VS Code `http.proxy` setting or HTTPS_PROXY / HTTP_PROXY environment variables. `http.proxyStrictSSL` and `http.noProxy` are respected."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "vsce package",
+    "package:darwin-arm64": "vsce package --target darwin-arm64",
+    "package:darwin-x64": "vsce package --target darwin-x64",
+    "package:linux-x64": "vsce package --target linux-x64",
+    "package:linux-arm64": "vsce package --target linux-arm64",
+    "package:win32-x64": "vsce package --target win32-x64",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1031.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/client-ec2": "^3.0.0",
+    "@aws-sdk/client-ecr": "^3.0.0",
+    "@aws-sdk/client-ecs": "^3.0.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.1031.0",
+    "@aws-sdk/client-eventbridge": "^3.0.0",
+    "@aws-sdk/client-iam": "^3.0.0",
+    "@aws-sdk/client-kafka": "^3.0.0",
+    "@aws-sdk/client-lambda": "^3.0.0",
+    "@aws-sdk/client-rds": "^3.0.0",
+    "@aws-sdk/client-redshift": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-sfn": "^3.1032.0",
+    "@aws-sdk/client-sqs": "^3.1035.0",
+    "@aws-sdk/client-sts": "^3.0.0",
+    "@aws-sdk/client-vpc-lattice": "^3.1031.0",
+    "@aws-sdk/credential-providers": "^3.0.0",
+    "@aws-sdk/lib-storage": "^3.1032.0",
+    "@smithy/node-http-handler": "^4.6.0",
+    "cytoscape": "^3.30.0",
+    "cytoscape-fcose": "^2.2.0",
+    "http-proxy-agent": "^6.1.1",
+    "https-proxy-agent": "^6.2.1",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/sqlite3": "^3.1.11",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "^3.9.1",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.4"
+  }
+}

@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Coverage & reports
+coverage/
+
+# Lockfiles (generated; avoid noisy diffs)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Packaged extension
+*.vsix
+
+# Minified assets
+*.min.js
+*.min.css
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Local env
+.env
+.env.*
+
+# SQLite (local DB)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+
+# Logs
+*.log
+
+# OS / editor noise
+.DS_Store
