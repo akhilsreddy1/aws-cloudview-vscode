@@ -4,9 +4,28 @@ All notable changes to CloudView will be documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions
 adhere to [SemVer](https://semver.org/).
 
+## [0.0.28] - 2026-07-19
+
+### Added
+
+- **Kinesis Data Streams — new service.** 
+- **Step Functions — visual graph based on execution history.** 
+- **API Gateway  — TestInvokeMethod panel for REST routes.**
+
+## [0.0.27] - 2026-07-08
+
+### Added
+
+- **Go to resource** — a global fuzzy-search palette over the whole cached resource set. `Cmd+Alt+G` / `Ctrl+Alt+G` (also under `CloudView: Go to resource…`) opens a quick pick listing every resource across all selected accounts. Type name, ARN, region, or `tag key=value` to filter. Selecting one opens the correct service dashboard, auto-switches to the tab containing the resource, opens the drawer on it, and scrolls it into view — one keystroke from anywhere to any resource. Pure local SQLite query; no AWS round-trip.
+- **EC2 — Terminate instance action.** 🗑 Terminate available in the drawer for any non-terminated instance. Two-step gate: modal warning that spells out EBS volumes, EIPs, and any active termination-protection status, then a text input requiring the exact instance ID to proceed. `TerminateInstancesCommand` fires only if both gates pass.
+- **S3 — path search + navigation.** New indigo-tinted search bar in the S3 browser header. Paste `s3://bucket/prefix/…`, `bucket/key`, or a bare prefix and jump directly there; every intermediate ancestor is auto-loaded and expanded so the tree opens from root down to the target. Cross-bucket paths are politely rejected. The upload button then defaults to the pasted prefix.
+- **S3 — object delete.** 🗑 button beside the download button on each object row. Versioning-aware confirmation: on versioned buckets a single-modal soft-delete (creates a delete-marker); on unversioned buckets an additional type-the-filename gate before the permanent delete.
+
 ## [0.0.26] - 2026-06-14
 
-- **Hierarchy panels: unified visual hierarchy.**
+### Added
+
+- **Hierarchy panels: unified visual hierarchy.** 
 
 ## [0.0.25] - 2026-06-03
 

@@ -44,6 +44,7 @@ export class WelcomePanel {
       { key: "ecr", label: "ECR" },
       { key: "redshift", label: "Redshift" },
       { key: "msk", label: "MSK" },
+      { key: "kinesis", label: "Kinesis" },
       { key: "cloudformation", label: "CloudFormation" },
       { key: "logs", label: "CloudWatch Logs" },
     ];

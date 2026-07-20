@@ -603,6 +603,7 @@ const stepfunctionsConfig: ServiceViewConfig = {
   iconKey: "stepfunctions",
   columns: [
     { key: "name", label: "State Machine", type: "text" },
+    { key: "__sfnGraph", label: "Graph", type: "text" },
     { key: "__sfnExecute", label: "Execute", type: "text" },
     { key: "StateMachineType", label: "Type", type: "status" },
     { key: "Status", label: "Status", type: "status" },
@@ -623,6 +624,41 @@ const stepfunctionsConfig: ServiceViewConfig = {
     { id: "all", label: "All State Machines" },
     { id: "sfn_standard", label: "Standard", filter: (r) => String(rawVal(r, "StateMachineType") ?? "").toUpperCase() === "STANDARD" },
     { id: "sfn_express", label: "Express", filter: (r) => String(rawVal(r, "StateMachineType") ?? "").toUpperCase() === "EXPRESS" },
+  ],
+};
+
+// ─── Kinesis Data Streams ────────────────────────────────────────────────────
+
+const kinesisConfig: ServiceViewConfig = {
+  serviceId: "kinesis",
+  serviceLabel: "Kinesis Data Streams",
+  iconKey: "kinesis",
+  columns: [
+    { key: "name", label: "Stream", type: "text" },
+    { key: "__kinesisPeek", label: "Peek", type: "text" },
+    { key: "__kinesisTargets", label: "Targets", type: "text" },
+    { key: "StreamStatus", label: "Status", type: "status" },
+    { key: "StreamMode", label: "Mode", type: "status" },
+    { key: "OpenShardCount", label: "Shards", type: "number" },
+    { key: "RetentionPeriodHours", label: "Retention (hrs)", type: "number" },
+    { key: "EncryptionType", label: "Encryption", type: "status" },
+    { key: "ConsumerCount", label: "EFO Consumers", type: "number" },
+    { key: "CreationTimestamp", label: "Created", type: "date" },
+  ],
+  stats: [
+    { label: "Total Streams", color: "#7B2FBE", compute: (r) => r.length },
+    { label: "On-Demand", color: "#1d4ed8", compute: (r) => r.filter((x) => rawVal(x, "StreamMode") === "ON_DEMAND").length },
+    { label: "Provisioned", color: "#FF9900", compute: (r) => r.filter((x) => rawVal(x, "StreamMode") === "PROVISIONED").length },
+    { label: "Total shards", color: "#15803d", compute: (r) => sumRawField(r, "OpenShardCount") },
+    { label: "KMS-encrypted", color: "#6d28d9", compute: (r) => r.filter((x) => rawVal(x, "IsEncrypted") === true).length },
+    { label: "Active", color: "#15803d", compute: (r) => countByRawField(r, "StreamStatus", "ACTIVE") },
+  ],
+  tabs: [
+    { id: "all", label: "All Streams" },
+    { id: "kin_on_demand", label: "On-Demand", filter: (r) => rawVal(r, "StreamMode") === "ON_DEMAND" },
+    { id: "kin_provisioned", label: "Provisioned", filter: (r) => rawVal(r, "StreamMode") === "PROVISIONED" },
+    { id: "kin_encrypted", label: "Encrypted", filter: (r) => rawVal(r, "IsEncrypted") === true },
+    { id: "kin_active", label: "Active", filter: (r) => rawVal(r, "StreamStatus") === "ACTIVE" },
   ],
 };
 
@@ -721,22 +757,16 @@ const apigatewayConfig: ServiceViewConfig = {
     { label: "Total stages", color: "#854d0e", compute: (r) => r.filter((x) => x.type === ResourceTypes.apiGatewayStage || x.type === ResourceTypes.apiGatewayV2Stage).length },
   ],
   tabs: [
-    // Single APIs tab — Protocol column tells REST/HTTP/WebSocket apart so
-    // we don't need a separate sub-tab for each.
     {
       id: "apis",
-      label: "APIs",
-      filter: (r) => r.type === ResourceTypes.apiGatewayRestApi || r.type === ResourceTypes.apiGatewayV2Api,
-      columns: ["name", "Description", "ProtocolType", "__apigatewayRoutes"],
-    },
-    // Stages live in their own tab because they're a different shape (no
-    // routes drilldown, but they DO have an invoke URL worth showing).
-    {
-      id: "stages",
-      label: "Stages",
-      filter: (r) => r.type === ResourceTypes.apiGatewayStage || r.type === ResourceTypes.apiGatewayV2Stage,
-      columns: ["name", "ApiId", "InvokeUrl", "CreatedDate"],
-    },
+      label: "APIs & Stages",
+      filter: (r) =>
+        r.type === ResourceTypes.apiGatewayRestApi ||
+        r.type === ResourceTypes.apiGatewayV2Api ||
+        r.type === ResourceTypes.apiGatewayStage ||
+        r.type === ResourceTypes.apiGatewayV2Stage,
+      columns: ["name", "Description", "ProtocolType", "__apigatewayRoutes", "CreatedDate"],
+    }
   ],
 };
 
@@ -868,6 +898,7 @@ export const SERVICE_VIEW_CONFIGS: Record<string, ServiceViewConfig> = {
   stepfunctions: stepfunctionsConfig,
   logs: logsConfig,
   sqs: sqsConfig,
+  kinesis: kinesisConfig,
   apigateway: apigatewayConfig,
   glue: glueConfig,
   secretsmanager: secretsManagerConfig,
@@ -896,7 +927,10 @@ export function resolveResourceValue(resource: ResourceNode, key: string): unkno
     key === "__rdsHierarchy" ||
     key === "__ecsHierarchy" ||
     key === "__ec2Session" ||
-    key === "__ecsExec"
+    key === "__ecsExec" ||
+    key === "__kinesisPeek" ||
+    key === "__kinesisTargets" ||
+    key === "__sfnGraph"
   ) {
     return "";
   }

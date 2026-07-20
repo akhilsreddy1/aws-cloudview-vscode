@@ -49,6 +49,7 @@ const ICON_SERVICE_KEYS = [
   "lambda", "s3", "ec2", "rds", "vpc", "ecs", "ecr", "msk",
   "dynamodb", "eventbridge", "redshift", "cloudformation", "stepfunctions",
   "apigateway", "documentdb", "glue", "logs", "sqs", "systemsmanager", "secretsmanager",
+  "kinesis",
 ] as const;
 
 // Locate `media/icons/` from this compiled module. At runtime this file lives at
@@ -66,7 +67,13 @@ function loadIconSvg(serviceKey: string): string | null {
     const raw = fs.readFileSync(path.join(ICONS_DIR, `${serviceKey}.svg`), "utf8");
     return raw.replace(/^\s*<\?xml[^?]*\?>\s*/i, "").trim();
   } catch {
-    return null;
+    try {
+      const png = fs.readFileSync(path.join(ICONS_DIR, `${serviceKey}.png`));
+      const b64 = png.toString("base64");
+      return `<img src="data:image/png;base64,${b64}" alt="${serviceKey}" style="width:100%;height:100%;object-fit:contain;display:block" />`;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -102,6 +109,7 @@ export const SERVICE_COLORS: Record<string, string> = {
   redshift:    '#8C4FFF',
   stepfunctions: '#C925D1',
   logs:        '#E7157B',
+  kinesis:     '#7B2FBE',
 };
 
 // ── Modern light theme styles ────────────────────────────────────────────────

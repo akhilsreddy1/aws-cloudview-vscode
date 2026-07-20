@@ -94,6 +94,10 @@ export function buildSqsQueueArn(region: string, accountId: string, queueName: s
   return `arn:aws:sqs:${region}:${accountId}:${queueName}`;
 }
 
+export function buildKinesisStreamArn(region: string, accountId: string, streamName: string): string {
+  return `arn:aws:kinesis:${region}:${accountId}:stream/${streamName}`;
+}
+
 /**
  * SQS `GetQueueAttributes` / send/receive calls expect the queue URL, not the
  * ARN. Derive it from the well-known pattern used everywhere in AWS commercial

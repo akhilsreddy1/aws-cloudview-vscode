@@ -24,11 +24,12 @@ const SERVICE_ICON_MAP: Record<string, string> = {
   glue: "glue.svg",
   secretsmanager: "secretsmanager.svg",
   ssm: "systemsmanager.svg",
+  kinesis: "kinesis.svg",
 };
 
 // Preferred display order for services in the sidebar
 const SERVICE_DISPLAY_ORDER = [
-  "athena", "apigateway", "cloudformation", "dynamodb", "ec2", "ecr", "ecs", "eventbridge", "glue", "lambda", "logs", "msk", "rds", "redshift", "s3", "secretsmanager", "stepfunctions", "ssm", "vpc", "sqs",
+  "athena", "apigateway", "cloudformation", "dynamodb", "ec2", "ecr", "ecs", "eventbridge", "glue", "kinesis", "lambda", "logs", "msk", "rds", "redshift", "s3", "secretsmanager", "stepfunctions", "ssm", "vpc", "sqs",
 ];
 
 /**

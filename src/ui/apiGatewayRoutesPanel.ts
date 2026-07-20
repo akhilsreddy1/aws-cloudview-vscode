@@ -13,6 +13,7 @@ import type { CloudViewPlatform } from "../core/platform";
 import type { ResourceNode } from "../core/contracts";
 import { ResourceTypes } from "../core/resourceTypes";
 import { generateNonce, escapeHtml, buildCsp, BASE_STYLES } from "../views/webviewToolkit";
+import { ApiGatewayTestPanel } from "./apiGatewayTestPanel";
 
 /**
  * Per-API drilldown showing the route → integration mapping that the
@@ -64,6 +65,24 @@ export class ApiGatewayRoutesPanel {
           } else if (msg.kind === "stepfunctions") {
             await vscode.commands.executeCommand("cloudView.executeStateMachine", msg.targetArn);
           }
+        } else if (
+          msg.type === "openTestPanel" &&
+          typeof msg.resourceId === "string" &&
+          typeof msg.method === "string" &&
+          typeof msg.path === "string"
+        ) {
+          // Route → dedicated Test panel that drives TestInvokeMethod. REST
+          // only — v2 rows never expose the button.
+          await ApiGatewayTestPanel.open(this.platform, this.resource, {
+            resourceId: msg.resourceId,
+            method: msg.method,
+            path: msg.path,
+            requestParams: (msg.requestParams as {
+              querystring: Array<{ name: string; required: boolean }>;
+              header: Array<{ name: string; required: boolean }>;
+              path: Array<{ name: string; required: boolean }>;
+            } | undefined) ?? undefined,
+          });
         }
       } catch (err: unknown) {
         this.postError(err instanceof Error ? err.message : String(err));
@@ -167,7 +186,7 @@ export class ApiGatewayRoutesPanel {
           completed += 1;
           continue; // permission error on a single method shouldn't kill the table
         }
-        rows.push(restRowFromMethod(item.path, httpMethod, methodResp));
+        rows.push(restRowFromMethod(item.path, httpMethod, methodResp, item.id));
         completed += 1;
         // Throttle progress updates a bit so we're not blasting messages.
         if (completed % 10 === 0 || completed === totalMethods) {
@@ -397,10 +416,12 @@ export class ApiGatewayRoutesPanel {
   <div class="info-banner">
     <span class="info-icon">\u{2139}\u{FE0F}</span>
     <div>
-      <strong>Invoke integration endpoints</strong> — the <code>▶ Invoke</code> button on each route
-      calls the <em>backing</em> Lambda or Step Function directly, bypassing API Gateway. Use this to
-      test integration logic without dealing with API Gateway auth, request templates, or throttling.
-      For a full end-to-end HTTP call against the stage URL, use the AWS console or <code>curl</code>.
+      <strong>Two ways to exercise a route</strong> — <code>▶ Invoke</code> calls the <em>backing</em>
+      Lambda or Step Function directly, bypassing API Gateway (skips request templates, auth, throttling).
+      <code>▶ Test</code> uses <code>TestInvokeMethod</code> — the same call AWS Console's Test tab uses:
+      runs the full API-Gateway pipeline (path params, VTL, integration invocation) end-to-end and returns
+      the response plus the execution log, but bypasses the deployed stage so no deploy is required. Test
+      is REST-only; v2 HTTP/WebSocket routes must be tested against their deployed stage URL.
     </div>
   </div>
 
@@ -429,6 +450,7 @@ export class ApiGatewayRoutesPanel {
           <th>Integration</th>
           <th style="width:90px;">Auth</th>
           <th style="width:100px;">Invoke</th>
+          <th style="width:100px;">Test</th>
         </tr>
       </thead>
       <tbody id="routes-body"></tbody>
@@ -522,12 +544,36 @@ export class ApiGatewayRoutesPanel {
           invokeCell = '<span style="color:var(--muted);font-size:11px;">\\u2014</span>';
         }
 
+        // Test button: REST-only (resourceId is undefined on v2 rows). Drives
+        // TestInvokeMethod — actually runs the route's integration end-to-end
+        // (VTL templates → integration call → response mapping) but bypasses
+        // the deployed stage, so it works even for un-deployed changes.
+        var testCell;
+        if (r.resourceId) {
+          // JSON-encode the request-parameter contract so the panel can
+          // prefill known slots and flag missing required inputs.
+          // Base64-encode the JSON before stuffing it into a data-* attribute:
+          // the webview esc() does not escape double quotes, so a raw JSON
+          // attribute value would silently truncate at the first quote char.
+          var paramsJson = JSON.stringify(r.requestParams || {querystring:[],header:[],path:[]});
+          var paramsB64 = btoa(unescape(encodeURIComponent(paramsJson)));
+          testCell = '<button class="invoke-btn cv-test-btn"' +
+            ' data-test-resource-id="' + esc(r.resourceId) + '"' +
+            ' data-test-method="' + esc(r.method) + '"' +
+            ' data-test-path="' + esc(r.path) + '"' +
+            ' data-test-params-b64="' + paramsB64 + '"' +
+            ' title="Send a test request through the full API-Gateway pipeline (bypasses the deployed stage)">▶ Test</button>';
+        } else {
+          testCell = '<span style="color:var(--muted);font-size:11px;" title="TestInvokeMethod is REST-only; HTTP/WebSocket APIs must be tested against their deployed stage URL.">\\u2014</span>';
+        }
+
         html += '<tr>' +
           '<td><span class="method-pill ' + esc(methodCls) + '">' + esc(r.method) + '</span></td>' +
           '<td class="path">' + esc(r.path) + '</td>' +
           '<td><span class="integ-chip ' + integChipClass(integKind) + '"' + chipAttrs + '>' + esc(integLabel) + '</span></td>' +
           '<td><span class="auth-chip ' + esc(r.authorizationType || 'NONE') + '">' + esc(r.authorizationType || 'NONE') + '</span></td>' +
           '<td>' + invokeCell + '</td>' +
+          '<td>' + testCell + '</td>' +
           '</tr>';
       }
       tbody.innerHTML = html;
@@ -548,6 +594,24 @@ export class ApiGatewayRoutesPanel {
             type: 'invokeIntegration',
             kind: btn.getAttribute('data-invoke-kind'),
             targetArn: btn.getAttribute('data-invoke-arn'),
+          });
+        };
+      });
+      // Wire Test buttons → open the per-route TestInvokeMethod panel
+      tbody.querySelectorAll('button.cv-test-btn').forEach(function(btn) {
+        btn.onclick = function() {
+          var paramsB64 = btn.getAttribute('data-test-params-b64') || '';
+          var params;
+          try {
+            var paramsJson = paramsB64 ? decodeURIComponent(escape(atob(paramsB64))) : '{}';
+            params = JSON.parse(paramsJson);
+          } catch (_) { params = undefined; }
+          vscode.postMessage({
+            type: 'openTestPanel',
+            resourceId: btn.getAttribute('data-test-resource-id'),
+            method: btn.getAttribute('data-test-method'),
+            path: btn.getAttribute('data-test-path'),
+            requestParams: params,
           });
         };
       });
@@ -635,6 +699,23 @@ interface RouteRow {
   integrationTargetArn?: string;
   invokableKind?: "lambda" | "stepfunctions";
   invokableTargetArn?: string;
+  /**
+   * REST-only: API Gateway resource id required for `TestInvokeMethod`.
+   * v2 (HTTP/WebSocket) rows leave this undefined — v2 has no server-side
+   * TestInvoke equivalent, so the Test button hides itself for those.
+   */
+  resourceId?: string;
+  /**
+   * REST-only: parsed `method.request.*` parameter contract so the Test
+   * panel can prefill the URL / headers with known slots and flag missing
+   * required inputs before send. Each entry's boolean is `true` when
+   * required. Undefined for v2 rows.
+   */
+  requestParams?: {
+    querystring: Array<{ name: string; required: boolean }>;
+    header: Array<{ name: string; required: boolean }>;
+    path: Array<{ name: string; required: boolean }>;
+  };
 }
 
 interface ClassifiedIntegration {
@@ -754,7 +835,7 @@ function classifyIntegration(
   return { kind: "none", label: uri };
 }
 
-function restRowFromMethod(path: string, httpMethod: string, m: RestMethod): RouteRow {
+function restRowFromMethod(path: string, httpMethod: string, m: RestMethod, resourceId: string): RouteRow {
   const integ = m.methodIntegration;
   const classified = classifyIntegration(
     integ?.uri,
@@ -772,7 +853,40 @@ function restRowFromMethod(path: string, httpMethod: string, m: RestMethod): Rou
     integrationTargetArn: classified.targetArn,
     invokableKind: classified.invokableKind,
     invokableTargetArn: classified.invokableTargetArn,
+    resourceId,
+    requestParams: parseRequestParameters(m.requestParameters),
   };
+}
+
+/**
+ * Turn API Gateway's flat `requestParameters` map into three lists the Test
+ * panel can render directly. Keys look like:
+ *   method.request.querystring.<name>
+ *   method.request.header.<name>
+ *   method.request.path.<name>
+ * The boolean value indicates whether the parameter is required.
+ * Unknown key shapes are ignored — we surface only what we understand.
+ */
+function parseRequestParameters(
+  raw: Record<string, boolean> | undefined,
+): RouteRow["requestParams"] {
+  const out = {
+    querystring: [] as Array<{ name: string; required: boolean }>,
+    header: [] as Array<{ name: string; required: boolean }>,
+    path: [] as Array<{ name: string; required: boolean }>,
+  };
+  if (!raw) return out;
+  for (const [key, required] of Object.entries(raw)) {
+    const parts = key.split(".");
+    // Expected shape: ["method", "request", <kind>, <name>...]
+    if (parts.length < 4 || parts[0] !== "method" || parts[1] !== "request") continue;
+    const kind = parts[2];
+    const name = parts.slice(3).join("."); // preserve dots in header names
+    if (kind === "querystring") out.querystring.push({ name, required: Boolean(required) });
+    else if (kind === "header") out.header.push({ name, required: Boolean(required) });
+    else if (kind === "path") out.path.push({ name, required: Boolean(required) });
+  }
+  return out;
 }
 
 function v2RowFromRoute(

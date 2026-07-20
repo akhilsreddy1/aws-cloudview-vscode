@@ -56,6 +56,8 @@ export const ResourceTypes = {
   glueTrigger: "aws.glue.trigger",
   // Secrets Manager.
   secretsManagerSecret: "aws.secretsmanager.secret",
+  // Kinesis Data Streams.
+  kinesisStream: "aws.kinesis.stream",
 } as const;
 
 export type ResourceType = (typeof ResourceTypes)[keyof typeof ResourceTypes];

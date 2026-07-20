@@ -5,6 +5,7 @@ import {
   ListObjectsV2Command,
   HeadObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
   type _Object,
   type CommonPrefix,
 } from "@aws-sdk/client-s3";
@@ -107,6 +108,10 @@ export class S3BrowserPanel {
           await this.handleUpload();
         } else if (msg.type === "download" && typeof msg.key === "string") {
           await this.handleDownload(msg.key, typeof msg.name === "string" ? msg.name : undefined);
+        } else if (msg.type === "navigate" && typeof msg.path === "string") {
+          await this.handleNavigate(msg.path);
+        } else if (msg.type === "deleteObject" && typeof msg.key === "string") {
+          await this.handleDelete(msg.key, typeof msg.name === "string" ? msg.name : undefined);
         }
       } catch (err) {
         this.postError(err);
@@ -395,6 +400,174 @@ export class S3BrowserPanel {
     );
   }
 
+  // ── Navigate (jump to a pasted S3 path) ─────────────────────────────────
+  /**
+   * Parse a pasted path and jump straight to the containing prefix.
+   *
+   * Accepted shapes (leading/trailing whitespace ignored):
+   *   • `s3://<bucket>/<prefix>/`     → prefix used as-is
+   *   • `s3://<bucket>/<prefix>/file` → prefix stripped of the file basename
+   *   • `<bucket>/<prefix>/`          → same as above, without the scheme
+   *   • `<prefix>/`                   → treated as a prefix under the current bucket
+   *   • `<prefix>/file`               → parent prefix under the current bucket
+   *   • empty string or `s3://<bucket>/` → root of the current bucket
+   *
+   * The bucket in an `s3://…` URI must match the panel's bucket; cross-bucket
+   * navigation would need a different panel instance.
+   */
+  private async handleNavigate(rawInput: string): Promise<void> {
+    const input = rawInput.trim();
+    if (!input) {
+      await this.loadPrefixListing("");
+      return;
+    }
+
+    let bucket: string | undefined;
+    let pathPart = input;
+    const s3UriMatch = /^s3:\/\/([^/]+)\/?(.*)$/i.exec(input);
+    if (s3UriMatch) {
+      bucket = s3UriMatch[1];
+      pathPart = s3UriMatch[2];
+    }
+
+    // If the input STARTS with the bucket name followed by a slash, treat it
+    // as `<bucket>/<key>` — a common paste from the AWS console.
+    if (!bucket && input.startsWith(this.bucketName + "/")) {
+      bucket = this.bucketName;
+      pathPart = input.slice(this.bucketName.length + 1);
+    }
+
+    if (bucket && bucket !== this.bucketName) {
+      void vscode.window.showWarningMessage(
+        `That path is for bucket "${bucket}" — this panel is browsing "${this.bucketName}".`,
+      );
+      return;
+    }
+
+    // If the tail looks like a file (no trailing slash but has an extension),
+    // strip to the parent prefix so the listing shows the object as one of
+    // its siblings. Otherwise treat the whole thing as a prefix and ensure a
+    // trailing slash for the S3 delimiter query.
+    let prefix = pathPart;
+    if (prefix && !prefix.endsWith("/")) {
+      const lastSeg = prefix.split("/").pop() ?? "";
+      const looksLikeFile = lastSeg.includes(".");
+      if (looksLikeFile) {
+        prefix = prefix.slice(0, prefix.length - lastSeg.length);
+      } else {
+        prefix = prefix + "/";
+      }
+    }
+
+    // The tree renders top-down from `treeData['']` and recurses into
+    // expanded children — so loading ONLY the deep target prefix leaves the
+    // UI stuck at whatever level was already open. Walk every intermediate
+    // ancestor from root to target and load each; the webview marks each
+    // loaded prefix as `expanded: true`, which is exactly what we need for
+    // the tree to open all the way down.
+    //
+    // e.g. target = "sparkHistoryLogs/jr_abc/nested/" → we load:
+    //   "" (already loaded on panel open, but re-loading is cheap + idempotent)
+    //   "sparkHistoryLogs/"
+    //   "sparkHistoryLogs/jr_abc/"
+    //   "sparkHistoryLogs/jr_abc/nested/"
+    const segments = prefix.split("/").filter((s) => s.length > 0);
+    const ancestors: string[] = [""];
+    for (let i = 0; i < segments.length; i++) {
+      ancestors.push(segments.slice(0, i + 1).join("/") + "/");
+    }
+
+    // Load in top-down order so the outer prefixes render first and the
+    // deeper ones arrive to an already-visible tree. Any 404 (bad paste)
+    // falls through to the outer try/catch → error banner.
+    for (const ancestor of ancestors) {
+      await this.loadPrefixListing(ancestor);
+    }
+
+    // Remember the target so subsequent Upload / actions default to it.
+    this.currentPrefix = prefix;
+  }
+
+  // ── Delete an object ─────────────────────────────────────────────────────
+  /**
+   * Delete a single object via `DeleteObject`. Two-step gate:
+   *   1. Modal warning that surfaces the bucket's versioning status — soft
+   *      (versioned) deletes create a delete-marker; unversioned deletes are
+   *      permanent.
+   *   2. Only on unversioned buckets: a second input-box that requires the
+   *      user to type the object's name to confirm. Versioned buckets are
+   *      recoverable so the second gate would be noise; unversioned buckets
+   *      are not, so it's warranted.
+   *
+   * After success we reload the current prefix so the row disappears.
+   */
+  private async handleDelete(key: string, displayName?: string): Promise<void> {
+    const shortName = displayName || key.split("/").pop() || key;
+    const versioning = String(
+      (this.resource.rawJson as Record<string, unknown>).VersioningStatus ?? "Disabled",
+    );
+    const versioned = versioning === "Enabled";
+
+    const detailLines = [
+      `Bucket: ${this.bucketName}`,
+      `Key: ${key}`,
+      `Region: ${this.bucketRegion}`,
+      "",
+      versioned
+        ? "The bucket has versioning ENABLED — this creates a delete-marker. Prior versions remain and can be restored from the AWS Console."
+        : "The bucket does NOT have versioning enabled — this DELETE IS PERMANENT. There is no way to recover this object from CloudView.",
+    ];
+
+    const first = await vscode.window.showWarningMessage(
+      `Delete "${shortName}"?`,
+      { modal: true, detail: detailLines.join("\n") },
+      versioned ? "Delete" : "Continue to delete",
+    );
+    if (!first) return;
+
+    // For unversioned buckets, second gate: type the object's short name.
+    if (!versioned) {
+      const typed = await vscode.window.showInputBox({
+        title: `Confirm permanent delete of ${shortName}`,
+        prompt: `Type the object name to confirm: ${shortName}`,
+        placeHolder: shortName,
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          value.trim() === shortName ? null : `Must exactly match "${shortName}".`,
+      });
+      if (typed?.trim() !== shortName) return;
+    }
+
+    const profileName = await this.platform.sessionManager.findProfileNameByAccountId(
+      this.resource.accountId,
+    );
+    if (!profileName) {
+      this.postError(new Error("No AWS profile found for this account."));
+      return;
+    }
+    const scope = {
+      profileName,
+      accountId: this.resource.accountId,
+      region: this.resource.region,
+    };
+    try {
+      const client = await this.platform.awsClientFactory.s3(scope, this.bucketRegion);
+      await this.platform.scheduler.run("s3", "DeleteObject", () =>
+        client.send(new DeleteObjectCommand({ Bucket: this.bucketName, Key: key })),
+      );
+      void vscode.window.setStatusBarMessage(
+        versioned
+          ? `Deleted (versioned) s3://${this.bucketName}/${key}`
+          : `Permanently deleted s3://${this.bucketName}/${key}`,
+        3500,
+      );
+      // Reload the containing prefix so the row disappears.
+      await this.loadPrefixListing(this.currentPrefix);
+    } catch (err: unknown) {
+      this.postError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   /**
    * Cancel the in-flight upload, if any. Aborts the multipart session on
    * S3 (no orphan parts left behind after a few days) and closes the
@@ -548,14 +721,56 @@ ${BASE_STYLES}
   content: ''; position: absolute; left: -1px; top: 0; bottom: 0;
   width: 1px; background: var(--border);
 }
-.s3-dl-btn {
+.s3-dl-btn, .s3-del-btn {
   padding: 2px 8px; border-radius: var(--radius-sm);
   border: 1px solid var(--border-2); background: transparent; color: var(--text-2);
   font-size: 10px; font-weight: 600; cursor: pointer; white-space: nowrap;
   opacity: 0; transition: all .12s; font-family: inherit;
 }
-.s3-tree-item:hover .s3-dl-btn { opacity: 1; }
+.s3-tree-item:hover .s3-dl-btn,
+.s3-tree-item:hover .s3-del-btn { opacity: 1; }
 .s3-dl-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.s3-del-btn { color: #b91c1c; }
+.s3-del-btn:hover { background: #b91c1c; color: #fff; border-color: #b91c1c; }
+
+/* ── Path navigation input in the header ── */
+/*
+ * Uses rgba on a fixed indigo hue so the tint reads correctly in both the
+ * light and dark VS Code themes (the underlying surface swaps but the tint
+ * stays legible). The colour is deliberately different from the accent
+ * (orange, used by Upload) so the search field pops without competing with
+ * the primary action.
+ */
+.s3-nav-form {
+  display: flex; gap: 6px; align-items: center; margin-top: 10px;
+  padding: 6px 8px; border-radius: var(--radius);
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+.s3-nav-icon {
+  font-size: 14px; color: rgb(79, 70, 229); padding-left: 4px;
+}
+.s3-nav-input {
+  flex: 1; min-width: 240px;
+  padding: 6px 10px; font-size: 12px; font-family: 'SF Mono','Fira Code',monospace;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: var(--text);
+  border-radius: var(--radius-sm); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.s3-nav-input::placeholder { color: rgba(99, 102, 241, 0.55); }
+.s3-nav-input:focus {
+  border-color: rgb(99, 102, 241);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+.s3-nav-go {
+  padding: 5px 12px; font-size: 11px; font-weight: 600; cursor: pointer;
+  background: rgb(99, 102, 241); border: 1px solid rgb(99, 102, 241); color: #fff;
+  border-radius: var(--radius-sm); white-space: nowrap;
+  transition: background .12s;
+}
+.s3-nav-go:hover { background: rgb(79, 70, 229); border-color: rgb(79, 70, 229); }
 
 /* ── Upload button ── */
 .s3-upload-btn {
@@ -612,6 +827,13 @@ ${BASE_STYLES}
       <button class="s3-upload-btn" id="upload" title="Upload a file to the bucket root">&#8682; Upload File</button>
     </div>
   </div>
+  <form class="s3-nav-form" id="navForm" onsubmit="return false">
+    <span class="s3-nav-icon">\u{1F50D}</span>
+    <input class="s3-nav-input" id="navInput" type="text"
+      placeholder="Jump to s3://${escapeHtml(this.bucketName)}/… or a prefix/ path"
+      autocomplete="off" spellcheck="false" />
+    <button class="s3-nav-go" type="submit" id="navGo" title="Jump to this path">Go &rarr;</button>
+  </form>
   <div class="cv-stats" id="stats"></div>
   <div id="uploadTarget" class="s3-upload-target" style="display:none"></div>
   <div class="s3-progress" id="progress"></div>
@@ -629,6 +851,14 @@ let selectedPrefix = '';
 document.getElementById('refresh').addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
 document.getElementById('upload').addEventListener('click', () => {
   vscode.postMessage({ type: 'upload', prefix: selectedPrefix });
+});
+
+/* Nav form — Enter or the Go button posts the pasted path to the backend,
+   which parses s3://…, bucket/key, or bare prefix shapes. */
+document.getElementById('navForm').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const input = document.getElementById('navInput');
+  vscode.postMessage({ type: 'navigate', path: input.value || '' });
 });
 
 window.addEventListener('message', (ev) => {
@@ -741,6 +971,8 @@ function renderLevel(prefix, listing, depth) {
         '<span class="s3-tree-size">' + fmtBytes(o.size) + '</span>' +
         '<button class="s3-dl-btn" data-key="' + esc(o.key) + '" data-name="' + esc(o.name) +
           '" title="Download">\u2193</button>' +
+        '<button class="s3-del-btn" data-key="' + esc(o.key) + '" data-name="' + esc(o.name) +
+          '" title="Delete">\u{1F5D1}</button>' +
       '</span>' +
     '</div>';
   }
@@ -781,7 +1013,7 @@ function relDate(iso) {
 function bindTreeEvents(container) {
   container.querySelectorAll('.s3-tree-folder').forEach(function(row) {
     row.addEventListener('click', function(ev) {
-      if (ev.target.closest('.s3-dl-btn')) return;
+      if (ev.target.closest('.s3-dl-btn') || ev.target.closest('.s3-del-btn')) return;
       var prefix = row.getAttribute('data-prefix');
 
       selectedPrefix = prefix;
@@ -810,6 +1042,17 @@ function bindTreeEvents(container) {
       ev.stopPropagation();
       vscode.postMessage({
         type: 'download',
+        key: btn.getAttribute('data-key'),
+        name: btn.getAttribute('data-name'),
+      });
+    });
+  });
+
+  container.querySelectorAll('.s3-del-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      vscode.postMessage({
+        type: 'deleteObject',
         key: btn.getAttribute('data-key'),
         name: btn.getAttribute('data-name'),
       });

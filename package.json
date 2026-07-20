@@ -2,7 +2,7 @@
   "name": "aws-cloudview",
   "displayName": "AWS CloudView",
   "description": "Explore, manage, and map AWS resources from VS Code—rich HTML webviews for each resource, dashboards, and graphs",
-  "version": "0.0.26",
+  "version": "0.0.28",
   "publisher": "akhileshreddy",
   "icon": "media/icon.png",
   "engines": {
@@ -69,6 +69,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "cloudView.goToResource",
+        "title": "CloudView: Go to resource…",
+        "icon": "$(search)"
+      },
+      {
         "command": "cloudView.openServiceDetail",
         "title": "CloudView: Open Service Dashboard",
         "icon": "$(table)"
@@ -107,6 +112,21 @@
         "command": "cloudView.invokeLambda",
         "title": "CloudView: Invoke Lambda Function",
         "icon": "$(play)"
+      },
+      {
+        "command": "cloudView.sfn.viewGraph",
+        "title": "CloudView: Step Functions — Visual Graph & Execution Overlay",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "cloudView.kinesis.peek",
+        "title": "CloudView: Kinesis — Peek Records",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "cloudView.kinesis.viewTargets",
+        "title": "CloudView: Kinesis — View Targets (Lambda / Firehose / EFO)",
+        "icon": "$(references)"
       },
       {
         "command": "cloudView.openWelcome",
@@ -276,6 +296,11 @@
         "key": "ctrl+shift+r",
         "mac": "cmd+shift+r",
         "when": "view == cloudViewServices"
+      },
+      {
+        "command": "cloudView.goToResource",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g"
       }
     ],
     "configuration": {
@@ -375,9 +400,11 @@
     "@aws-sdk/client-ecs": "^3.0.0",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.1031.0",
     "@aws-sdk/client-eventbridge": "^3.0.0",
+    "@aws-sdk/client-firehose": "^3.1090.0",
     "@aws-sdk/client-glue": "^3.1052.0",
     "@aws-sdk/client-iam": "^3.0.0",
     "@aws-sdk/client-kafka": "^3.0.0",
+    "@aws-sdk/client-kinesis": "^3.1090.0",
     "@aws-sdk/client-lambda": "^3.0.0",
     "@aws-sdk/client-rds": "^3.0.0",
     "@aws-sdk/client-redshift": "^3.0.0",

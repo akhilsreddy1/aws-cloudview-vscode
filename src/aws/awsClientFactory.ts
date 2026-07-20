@@ -22,6 +22,8 @@ import { ApiGatewayV2Client } from "@aws-sdk/client-apigatewayv2";
 import { GlueClient } from "@aws-sdk/client-glue";
 import { SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { SSMClient } from "@aws-sdk/client-ssm";
+import { KinesisClient } from "@aws-sdk/client-kinesis";
+import { FirehoseClient } from "@aws-sdk/client-firehose";
 import type { NodeHttpHandler } from "@smithy/node-http-handler";
 import { GLOBAL_REGION, type AwsProfileSession, type AwsScope, type Logger } from "../core/contracts";
 import type { SessionManager } from "./sessionManager";
@@ -198,6 +200,16 @@ export class AwsClientFactory {
   /** Returns a cached SQS client for the given scope. Used to list queues, peek messages, and redrive DLQs. */
   public async sqs(scope: AwsScope): Promise<SQSClient> {
     return this.resolveAndCreate(scope, "sqs", SQSClient);
+  }
+
+  /** Returns a cached Kinesis Data Streams client for the given scope. */
+  public async kinesis(scope: AwsScope): Promise<KinesisClient> {
+    return this.resolveAndCreate(scope, "kinesis", KinesisClient);
+  }
+
+  /** Returns a cached Firehose client for the given scope. Used to enumerate delivery streams that source from a Kinesis stream. */
+  public async firehose(scope: AwsScope): Promise<FirehoseClient> {
+    return this.resolveAndCreate(scope, "firehose", FirehoseClient);
   }
 
   /** Returns a cached Athena client for the given scope. Used by the query runner panel. */

@@ -128,7 +128,13 @@ export class ServiceDetailPanel {
     platform: CloudViewPlatform,
     serviceKey: string,
     accountIds: string[],
-    regions: string[]
+    regions: string[],
+    /**
+     * If set, the webview will scroll to and open the drawer for this ARN
+     * once the resource list has rendered. Used by the "Go to resource"
+     * command so the palette pick lands directly on the target row.
+     */
+    opts?: { focusArn?: string },
   ): Promise<void> {
     const config = getServiceViewConfig(serviceKey);
     if (!config) {
@@ -156,11 +162,23 @@ export class ServiceDetailPanel {
         stats: existing.computeStats(resources),
       });
       existing.panel.reveal();
+      if (opts?.focusArn) {
+        existing.panel.webview.postMessage({ type: "focusResource", arn: opts.focusArn });
+      }
       return;
     }
 
     const instance = new ServiceDetailPanel(platform, panelKey, config, resources, accountIds, queryRegions);
     ServiceDetailPanel.panels.set(panelKey, instance);
+    if (opts?.focusArn) {
+      // The webview needs a tick to run its initial render before it can
+      // find the target row. Small delay is simpler than plumbing a "ready"
+      // signal through the message channel for this one-shot use case.
+      const focusArn = opts.focusArn;
+      setTimeout(() => {
+        instance.panel.webview.postMessage({ type: "focusResource", arn: focusArn });
+      }, 200);
+    }
   }
 
   /**
@@ -875,6 +893,9 @@ export class ServiceDetailPanel {
       var COLUMN_BUTTONS = [
         { key: '__mskTopics', service: 'msk', cls: 'cv-topics-btn', attr: 'data-topics-arn', label: 'View Topics \\u2192', msgType: 'mskViewTopics', arnKey: 'topicsArn' },
         { key: '__lambdaInvoke', service: 'lambda', cls: 'cv-invoke-btn', attr: 'data-invoke-arn', label: '\\u25B6 Invoke', msgType: 'invokeLambda', arnKey: 'invokeArn' },
+        { key: '__sfnGraph', service: 'stepfunctions', cls: 'cv-invoke-btn', attr: 'data-sfn-graph-arn', label: '\\u{1F5FA} Graph', msgType: 'sfnViewGraph', arnKey: 'sfnGraphArn' },
+        { key: '__kinesisPeek', service: 'kinesis', cls: 'cv-invoke-btn', attr: 'data-kinesis-peek-arn', label: '\\u26A1 Peek', msgType: 'kinesisPeek', arnKey: 'kinesisPeekArn' },
+        { key: '__kinesisTargets', service: 'kinesis', cls: 'cv-invoke-btn', attr: 'data-kinesis-targets-arn', label: '\\u{1F517} Targets', msgType: 'kinesisViewTargets', arnKey: 'kinesisTargetsArn' },
         { key: '__sfnExecute', service: 'stepfunctions', cls: 'cv-execute-btn', attr: 'data-execute-arn', label: '\\u25B6 Execute', msgType: 'executeStateMachine', arnKey: 'executeArn' },
         { key: '__logsBrowse', service: 'logs', cls: 'cv-logs-browse-btn', attr: 'data-logs-browse-arn', label: '\\u{1F4CB} Browse \\u2192', msgType: 'logsBrowseStreams', arnKey: 'logsBrowseArn' },
         { key: '__ecrImages', service: 'ecr', cls: 'cv-invoke-btn', attr: 'data-ecr-images-arn', label: '\\u{1F4E6} View Images', msgType: 'viewEcrImages', arnKey: 'ecrImagesArn' },
@@ -1064,22 +1085,92 @@ export class ServiceDetailPanel {
         tbody.innerHTML = '<tr><td class="cv-empty" colspan="' + activeCols.length + '"><span class="cv-empty-icon">\\u2601</span>No resources found<br><span style="font-size:11px;color:var(--muted);font-weight:400;">' + escHtml(hint) + '</span></td></tr>';
         return;
       }
-      tbody.innerHTML = filtered.map(function(r) {
-        var classes = [];
-        if (r.arn === selectedArn) classes.push('selected');
-        var extra = cfnRowClass(r);
-        if (extra) classes.push(extra.trim());
-        var cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
-        return '<tr data-arn="' + escHtml(r.arn || '') + '"' + cls + '>' +
-          activeCols.map(function(c) { return '<td>' + renderColumnCell(r, c) + '</td>'; }).join('') +
-          '</tr>';
-      }).join('');
+      if (SERVICE_ID === 'apigateway' && activeTab === 'apis') {
+        // Group API-Gateway stages under their parent API row so users see
+        // the API → Stages tree at a glance. Any stage whose ApiId doesn't
+        // resolve to an API in the current filter drops into an "Orphan
+        // stages" bucket at the end so nothing is silently hidden.
+        var apis = filtered.filter(function(r) {
+          return r.resourceType === 'aws.apigateway.rest-api' || r.resourceType === 'aws.apigatewayv2.api';
+        });
+        var stages = filtered.filter(function(r) {
+          return r.resourceType === 'aws.apigateway.stage' || r.resourceType === 'aws.apigatewayv2.stage';
+        });
+        var stagesByApi = {};
+        var orphanStages = [];
+        stages.forEach(function(s) {
+          var apiId = String(getVal(s, 'ApiId') || '');
+          if (apiId && apis.some(function(a) { return String(getVal(a, 'ApiId') || '') === apiId; })) {
+            (stagesByApi[apiId] = stagesByApi[apiId] || []).push(s);
+          } else {
+            orphanStages.push(s);
+          }
+        });
+        apis.sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        Object.keys(stagesByApi).forEach(function(k) {
+          stagesByApi[k].sort(function(a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        });
+
+        var rowHtml = [];
+        function renderStageCell(stage, col) {
+          // Repurpose the API columns for stage rows so they show useful
+          // stage-level info instead of blanks.
+          if (col.key === 'Description') {
+            var url = getVal(stage, 'InvokeUrl');
+            return url ? '<code style="font-size:11px;">' + escHtml(String(url)) + '</code>' : '';
+          }
+          if (col.key === 'ProtocolType') {
+            return '<span style="font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">stage</span>';
+          }
+          if (col.key === '__apigatewayRoutes') return '';
+          return renderColumnCell(stage, col);
+        }
+
+        apis.forEach(function(api) {
+          var apiId = String(getVal(api, 'ApiId') || '');
+          var kids = stagesByApi[apiId] || [];
+          var apiCls = api.arn === selectedArn ? 'selected cv-row-cluster' : 'cv-row-cluster';
+          rowHtml.push('<tr data-arn="' + escHtml(api.arn || '') + '" class="' + apiCls + '">' +
+            activeCols.map(function(c) { return '<td>' + renderColumnCell(api, c) + '</td>'; }).join('') +
+            '</tr>');
+          kids.forEach(function(st) {
+            var stCls = st.arn === selectedArn ? 'selected cv-row-child' : 'cv-row-child';
+            rowHtml.push('<tr data-arn="' + escHtml(st.arn || '') + '" class="' + stCls + '">' +
+              activeCols.map(function(c) { return '<td>' + renderStageCell(st, c) + '</td>'; }).join('') +
+              '</tr>');
+          });
+        });
+        if (orphanStages.length > 0) {
+          rowHtml.push('<tr class="cv-row-standalone-hdr"><td colspan="' + activeCols.length + '">Stages whose API is not in the current filter</td></tr>');
+          orphanStages.forEach(function(st) {
+            var stCls = st.arn === selectedArn ? 'selected cv-row-child' : 'cv-row-child';
+            rowHtml.push('<tr data-arn="' + escHtml(st.arn || '') + '" class="' + stCls + '">' +
+              activeCols.map(function(c) { return '<td>' + renderStageCell(st, c) + '</td>'; }).join('') +
+              '</tr>');
+          });
+        }
+        tbody.innerHTML = rowHtml.join('');
+      } else {
+        tbody.innerHTML = filtered.map(function(r) {
+          var classes = [];
+          if (r.arn === selectedArn) classes.push('selected');
+          var extra = cfnRowClass(r);
+          if (extra) classes.push(extra.trim());
+          var cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
+          return '<tr data-arn="' + escHtml(r.arn || '') + '"' + cls + '>' +
+            activeCols.map(function(c) { return '<td>' + renderColumnCell(r, c) + '</td>'; }).join('') +
+            '</tr>';
+        }).join('');
+      }
 
       // Data-driven click bindings for all standard action buttons
       var BTN_BINDINGS = [
         { attr: 'data-topics-arn', msgType: 'mskViewTopics', arnKey: 'topicsArn' },
         { attr: 'data-invoke-arn', msgType: 'invokeLambda', arnKey: 'invokeArn' },
         { attr: 'data-execute-arn', msgType: 'executeStateMachine', arnKey: 'executeArn' },
+        { attr: 'data-sfn-graph-arn', msgType: 'sfnViewGraph', arnKey: 'sfnGraphArn' },
+        { attr: 'data-kinesis-peek-arn', msgType: 'kinesisPeek', arnKey: 'kinesisPeekArn' },
+        { attr: 'data-kinesis-targets-arn', msgType: 'kinesisViewTargets', arnKey: 'kinesisTargetsArn' },
         { attr: 'data-logs-browse-arn', msgType: 'logsBrowseStreams', arnKey: 'logsBrowseArn' },
         { attr: 'data-ecr-images-arn', msgType: 'viewEcrImages', arnKey: 'ecrImagesArn' },
         { attr: 'data-s3-browse-arn', msgType: 's3BrowsePrefixes', arnKey: 's3BrowseArn' },
@@ -1201,6 +1292,12 @@ export class ServiceDetailPanel {
       document.getElementById('cv-drawer-name').textContent = resource.name || resource.id;
       document.getElementById('cv-drawer-arn').textContent = resource.arn || '';
 
+      // Actions get built first into a separate buffer, then prepended to
+      // the rest of the drawer body so they always sit at the top — the
+      // most-used part of the drawer shouldn't require scrolling past
+      // Properties + Raw JSON to reach.
+      var actionsHtml = '<div class="cv-detail-section"><div class="cv-detail-section-title">Actions</div>';
+
       var html = '';
 
       html += '<div class="cv-detail-section"><div class="cv-detail-section-title">Properties</div>';
@@ -1306,24 +1403,23 @@ export class ServiceDetailPanel {
         escHtml(rawJsonStr) + '</pre>' +
       '</div>';
 
-      html += '<div class="cv-detail-section"><div class="cv-detail-section-title">Actions</div>';
       ACTIONS.forEach(function(a) {
         if (!drawerActionVisible(a, resource)) return;
-        html += '<button type="button" class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;" data-cv-action="' + escHtml(a.id) + '" data-arn="' + escHtml(resource.arn || '') + '">' + escHtml(a.title) + '</button>';
+        actionsHtml += '<button type="button" class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;" data-cv-action="' + escHtml(a.id) + '" data-arn="' + escHtml(resource.arn || '') + '">' + escHtml(a.title) + '</button>';
       });
       if (HAS_LOGS) {
-        html += '<button class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;border-color:#FF9900;color:#FF9900;" data-logs="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F4CB} View CloudWatch Logs</button>';
+        actionsHtml += '<button class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;border-color:#FF9900;color:#FF9900;" data-logs="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F4CB} View CloudWatch Logs</button>';
       }
-      html += '<button class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;border-color:#8C4FFF;color:#8C4FFF;" data-graph="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F517} Open Graph View</button>';
+      actionsHtml += '<button class="cv-btn" style="width:100%;margin-bottom:6px;justify-content:center;border-color:#8C4FFF;color:#8C4FFF;" data-graph="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F517} Open Graph View</button>';
       if (IS_CFN && resource.resourceType === 'aws.cloudformation.stack') {
-        html += '<button class="cv-btn cv-danger-btn" style="width:100%;margin-top:8px;justify-content:center;" data-delete-stack="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F5D1} Delete Stack</button>';
+        actionsHtml += '<button class="cv-btn cv-danger-btn" style="width:100%;margin-top:8px;justify-content:center;" data-delete-stack="true" data-arn="' + escHtml(resource.arn || '') + '">\\u{1F5D1} Delete Stack</button>';
       }
       if (IS_SFN && resource.resourceType === 'aws.stepfunctions.state-machine') {
-        html += '<button class="cv-btn" style="width:100%;margin-top:8px;justify-content:center;border-color:#C925D1;color:#C925D1;" data-execute-sm="true" data-arn="' + escHtml(resource.arn || '') + '">\\u25B6 Start Execution &amp; View History</button>';
+        actionsHtml += '<button class="cv-btn" style="width:100%;margin-top:8px;justify-content:center;border-color:#C925D1;color:#C925D1;" data-execute-sm="true" data-arn="' + escHtml(resource.arn || '') + '">\\u25B6 Start Execution &amp; View History</button>';
       }
-      html += '</div>';
+      actionsHtml += '</div>';
 
-      document.getElementById('cv-drawer-body').innerHTML = html;
+      document.getElementById('cv-drawer-body').innerHTML = actionsHtml + html;
 
       var loadTopicsBtn = document.getElementById('msk-load-topics');
       if (loadTopicsBtn && IS_MSK && resource.resourceType === 'aws.msk.cluster') {
@@ -1472,6 +1568,48 @@ export class ServiceDetailPanel {
         ALL_RESOURCES = msg.resources;
         STATS = msg.stats;
         renderStats(); renderTabs(); renderChips(); renderTable();
+      }
+      // Sent by "Go to resource" — scroll to and select the target row,
+      // opening the drawer automatically. May arrive before or after
+      // updateResources; either way we try until we can find the row (or
+      // give up after a short window).
+      if (msg.type === 'focusResource' && typeof msg.arn === 'string') {
+        var targetArn = msg.arn;
+        var attempts = 0;
+        var poll = setInterval(function() {
+          attempts += 1;
+          var found = (ALL_RESOURCES || []).find(function(r) { return r.arn === targetArn; });
+          if (!found) {
+            if (attempts >= 20) clearInterval(poll);
+            return;
+          }
+          // Some tabs filter out our target — switch to whichever tab
+          // contains it. We honour the resource's type; if no tab matches
+          // we fall back to the first tab and let the search filter show it.
+          var containingTabId = null;
+          for (var i = 0; i < TABS.length; i++) {
+            try {
+              if (typeof TABS[i].filter !== 'function' || TABS[i].filter(found)) {
+                containingTabId = TABS[i].id;
+                break;
+              }
+            } catch (_) { /* filter threw — skip */ }
+          }
+          if (containingTabId && containingTabId !== activeTab) {
+            activeTab = containingTabId;
+            renderTabs();
+          }
+          selectedArn = targetArn;
+          renderTable();
+          openDrawer(found);
+          setTimeout(function() {
+            var row = document.querySelector('tr[data-arn="' + targetArn.replace(/"/g, '\\\\"') + '"]');
+            if (row && row.scrollIntoView) {
+              row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+          }, 50);
+          clearInterval(poll);
+        }, 100);
       }
       if (msg.type === 'mskTopicsResult') {
         var loadBtn = document.getElementById('msk-load-topics');

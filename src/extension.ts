@@ -53,15 +53,20 @@ import { registerCfnStackPlugin } from "./plugins/cloudformation/cfnDiscoverer";
 import { registerSfnPlugin } from "./plugins/stepfunctions/sfnDiscoverer";
 import { registerLogsPlugin } from "./plugins/logs/logsDiscoverer";
 import { registerSqsPlugin } from "./plugins/sqs/sqsDiscoverer";
+import { registerKinesisPlugin } from "./plugins/kinesis/kinesisDiscoverer";
+import { KinesisPeekPanel } from "./ui/kinesisPeekPanel";
+import { KinesisTargetsPanel } from "./ui/kinesisTargetsPanel";
 import { registerApiGatewayPlugins } from "./plugins/apigateway/apiGatewayDiscoverer";
 import { registerApiGatewayRelationshipResolvers } from "./plugins/apigateway/relationshipResolvers";
 import { registerGluePlugin } from "./plugins/glue/glueDiscoverer";
 import { registerSecretsManagerPlugin } from "./plugins/secretsmanager/secretsManagerDiscoverer";
 import { GraphWebView } from "./ui/graphWebView";
 import { ServiceDetailPanel } from "./ui/serviceDetailPanel";
+import { showGoToResource } from "./ui/goToResourceCommand";
 import { CloudWatchLogsPanel } from "./ui/lambdaLogsPanel";
 import { LambdaInvokePanel } from "./ui/lambdaInvokePanel";
 import { StepFunctionsExecutionPanel } from "./ui/stepFunctionsExecutionPanel";
+import { StepFunctionsGraphPanel } from "./ui/stepFunctionsGraphPanel";
 import { EcrImagesPanel } from "./ui/ecrImagesPanel";
 import { EcsTaskDefPanel } from "./ui/ecsTaskDefPanel";
 import { PublicExposurePanel } from "./ui/publicExposurePanel";
@@ -252,6 +257,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
 
+    // ── Go to resource: global fuzzy-search over the whole local cache ──
+    vscode.commands.registerCommand("cloudView.goToResource", async () => {
+      await showGoToResource(platform);
+    }),
+
     // ── Profile and region toggles ──
     vscode.commands.registerCommand("cloudView.toggleProfile", async (profileName: string) => {
       await sessionManager.toggleProfile(profileName);
@@ -344,6 +354,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await StepFunctionsExecutionPanel.open(platform, resource);
       } else {
         void vscode.window.showWarningMessage("State machine not found in local cache. Refresh resources first.");
+      }
+    }),
+
+    // ── Open the visual ASL graph for a state machine ──
+    vscode.commands.registerCommand("cloudView.sfn.viewGraph", async (arn: string) => {
+      const resource = await platform.resourceRepo.getByArn(arn);
+      if (resource) {
+        await StepFunctionsGraphPanel.open(platform, resource);
+      } else {
+        void vscode.window.showWarningMessage("State machine not found in local cache. Refresh resources first.");
+      }
+    }),
+
+    // ── Kinesis: peek records from a shard ──
+    vscode.commands.registerCommand("cloudView.kinesis.peek", async (arn: string) => {
+      const resource = await platform.resourceRepo.getByArn(arn);
+      if (resource) {
+        await KinesisPeekPanel.open(platform, resource);
+      } else {
+        void vscode.window.showWarningMessage("Kinesis stream not found in local cache. Refresh resources first.");
+      }
+    }),
+
+    // ── Kinesis: view targets (Lambda mappings, Firehose, EFO consumers) ──
+    vscode.commands.registerCommand("cloudView.kinesis.viewTargets", async (arn: string) => {
+      const resource = await platform.resourceRepo.getByArn(arn);
+      if (resource) {
+        await KinesisTargetsPanel.open(platform, resource);
+      } else {
+        void vscode.window.showWarningMessage("Kinesis stream not found in local cache. Refresh resources first.");
       }
     }),
 
@@ -627,6 +667,7 @@ function registerPlatformPlugins(
   registerSfnPlugin(resourceRegistry);
   registerLogsPlugin(resourceRegistry);
   registerSqsPlugin(resourceRegistry);
+  registerKinesisPlugin(resourceRegistry);
   registerApiGatewayPlugins(resourceRegistry);
   registerGluePlugin(resourceRegistry);
   registerSecretsManagerPlugin(resourceRegistry);

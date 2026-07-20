@@ -292,6 +292,18 @@ const executeStateMachine: PanelActionHandler = async (msg) => {
   if (msg.arn) await vscode.commands.executeCommand("cloudView.executeStateMachine", msg.arn as string);
 };
 
+const sfnViewGraph: PanelActionHandler = async (msg) => {
+  if (msg.arn) await vscode.commands.executeCommand("cloudView.sfn.viewGraph", msg.arn as string);
+};
+
+const kinesisPeek: PanelActionHandler = async (msg) => {
+  if (msg.arn) await vscode.commands.executeCommand("cloudView.kinesis.peek", msg.arn as string);
+};
+
+const kinesisViewTargets: PanelActionHandler = async (msg) => {
+  if (msg.arn) await vscode.commands.executeCommand("cloudView.kinesis.viewTargets", msg.arn as string);
+};
+
 const invokeLambda: PanelActionHandler = async (msg) => {
   if (msg.arn) await vscode.commands.executeCommand("cloudView.invokeLambda", msg.arn as string);
 };
@@ -547,6 +559,9 @@ export const PANEL_ACTION_HANDLERS: Record<string, PanelActionHandler> = {
   mskViewTopics,
   deleteCfnStack,
   executeStateMachine,
+  sfnViewGraph,
+  kinesisPeek,
+  kinesisViewTargets,
   invokeLambda,
   openResource,
   runAction,

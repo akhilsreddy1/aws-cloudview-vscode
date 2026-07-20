@@ -6,7 +6,7 @@ import {
   StopDBClusterCommand,
   StopDBInstanceCommand,
 } from "@aws-sdk/client-rds";
-import { StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
+import { StartInstancesCommand, StopInstancesCommand, TerminateInstancesCommand } from "@aws-sdk/client-ec2";
 import type { ResourceAction, ResourceNode } from "../core/contracts";
 import type { CloudViewPlatform } from "../core/platform";
 import { ResourceTypes } from "../core/resourceTypes";
@@ -107,6 +107,36 @@ export function registerDefaultActions(actionRegistry: ActionRegistry): void {
     isAvailable: (resource) => resource.type === ResourceTypes.lambdaFunction,
     execute: async (resource) => {
       await vscode.commands.executeCommand("cloudView.invokeLambda", resource.arn);
+    }
+  });
+
+  actionRegistry.register({
+    id: "cloudView.sfn.viewGraph",
+    title: "\u{1F5FA} Graph & Execution Overlay",
+    order: 0,
+    isAvailable: (resource) => resource.type === ResourceTypes.sfnStateMachine,
+    execute: async (resource) => {
+      await vscode.commands.executeCommand("cloudView.sfn.viewGraph", resource.arn);
+    }
+  });
+
+  actionRegistry.register({
+    id: "cloudView.kinesis.peek",
+    title: "⚡ Peek records",
+    order: 0,
+    isAvailable: (resource) => resource.type === ResourceTypes.kinesisStream,
+    execute: async (resource) => {
+      await vscode.commands.executeCommand("cloudView.kinesis.peek", resource.arn);
+    }
+  });
+
+  actionRegistry.register({
+    id: "cloudView.kinesis.viewTargets",
+    title: "\u{1F517} View targets (Lambda / Firehose / EFO)",
+    order: 1,
+    isAvailable: (resource) => resource.type === ResourceTypes.kinesisStream,
+    execute: async (resource) => {
+      await vscode.commands.executeCommand("cloudView.kinesis.viewTargets", resource.arn);
     }
   });
 
@@ -369,7 +399,15 @@ async function refreshRdsAfterMutation(platform: CloudViewPlatform, resource: Re
 }
 
 const ECS_SCALE_ACTION_IDS = new Set<string>(["cloudView.ecs.scaleToZero", "cloudView.ecs.scaleFromZero"]);
-const EC2_START_STOP_ACTION_IDS = new Set<string>(["cloudView.ec2.start", "cloudView.ec2.stop"]);
+// Lifecycle actions that mutate instance state and therefore need a
+// post-mutation discovery refresh. Terminate is included even though the
+// helper is named "StartStop" — same downstream refresh behaviour, and
+// renaming the exported symbol would ripple further than it's worth.
+const EC2_START_STOP_ACTION_IDS = new Set<string>([
+  "cloudView.ec2.start",
+  "cloudView.ec2.stop",
+  "cloudView.ec2.terminate",
+]);
 const RDS_START_STOP_ACTION_IDS = new Set<string>([
   "cloudView.rds.startCluster",
   "cloudView.rds.stopCluster",
@@ -714,6 +752,91 @@ export function registerEc2Actions(actionRegistry: ActionRegistry): void {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         void vscode.window.showErrorMessage(`Failed to stop instance: ${message}`);
+      }
+    },
+  });
+
+  // Terminate is destructive and irreversible — two-step confirmation is
+  // deliberate. First a modal warning (spells out what "terminate" actually
+  // implies for volumes, EIPs, and termination protection), then an input
+  // box that requires the user to type the instance ID exactly. Same pattern
+  // the AWS Console uses for its more dangerous delete flows.
+  actionRegistry.register({
+    id: "cloudView.ec2.terminate",
+    title: "🗑 Terminate instance",
+    order: 6,
+    isAvailable: (resource) => {
+      if (resource.type !== ResourceTypes.ec2Instance) return false;
+      const state = ec2InstanceState(resource);
+      // Hide once the instance is already going away.
+      return state !== "terminated" && state !== "shutting-down";
+    },
+    execute: async (resource, platform) => {
+      const instanceId = resource.id;
+      if (!instanceId) {
+        void vscode.window.showErrorMessage("Missing instance ID. Refresh the EC2 dashboard and try again.");
+        return;
+      }
+
+      // If the discoverer captured DisableApiTermination, warn upfront rather
+      // than let AWS reject the call after the user has already typed the
+      // instance ID.
+      const raw = resource.rawJson as Record<string, unknown>;
+      const terminationProtection = raw.DisableApiTermination === true;
+
+      const detailLines = [
+        `Region: ${resource.region}`,
+        `Account: ${resource.accountId}`,
+        `Instance ID: ${instanceId}`,
+        "",
+        "⚠️ THIS IS PERMANENT AND IRREVERSIBLE.",
+        "• The instance will be shut down and deleted.",
+        "• EBS volumes marked delete-on-termination will be deleted.",
+        "• Instance-store volumes (if any) are lost.",
+        "• Elastic IPs are disassociated (release behaviour depends on your config).",
+      ];
+      if (terminationProtection) {
+        detailLines.push(
+          "",
+          "⚠️ TERMINATION PROTECTION IS ENABLED on this instance.",
+          "The API call will be rejected until you disable it (this action does not clear it).",
+        );
+      }
+
+      const first = await vscode.window.showWarningMessage(
+        `Terminate EC2 instance "${resource.name || instanceId}"?`,
+        { modal: true, detail: detailLines.join("\n") },
+        "Continue to termination",
+      );
+      if (first !== "Continue to termination") return;
+
+      const typed = await vscode.window.showInputBox({
+        title: `Confirm termination of ${instanceId}`,
+        prompt: `Type the instance ID exactly to confirm: ${instanceId}`,
+        placeHolder: instanceId,
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          value.trim() === instanceId ? null : `Must exactly match "${instanceId}" to proceed.`,
+      });
+      if (typed?.trim() !== instanceId) return;
+
+      const profileName = await platform.sessionManager.findProfileNameByAccountId(resource.accountId);
+      if (!profileName) {
+        void vscode.window.showErrorMessage("No AWS profile resolved for this account.");
+        return;
+      }
+      const scope = { profileName, accountId: resource.accountId, region: resource.region };
+      try {
+        const client = await platform.awsClientFactory.ec2(scope);
+        await platform.scheduler.run("ec2", "TerminateInstances", () =>
+          client.send(new TerminateInstancesCommand({ InstanceIds: [instanceId] })),
+        );
+        void vscode.window.showInformationMessage(
+          `Termination requested for "${resource.name || instanceId}". Refreshing soon…`,
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(`Failed to terminate instance: ${message}`);
       }
     },
   });
